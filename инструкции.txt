@@ -1,0 +1,138 @@
+1. создадим новый проект. для этого в консоли OpenServer запустим команду 
+(если перед этим вышло предупреждение обновить composer, то в консоли выполнить команду 
+composer self-update)
+composer create-project laravel/laravel instructions --prefer-dist
+
+
+2. далее после установки проекта открываем его в редакторе кода, и в файле .env указываем название 
+базы данных, имя пользователя и пароль  
+DB_DATABASE=instructions
+DB_USERNAME=root
+DB_PASSWORD=Frdtler0506
+
+3. в phpMyAdmin создадим бд с названием нашего проекта instructions
+
+4. так как в нашем приложении нужна аутентификация и авторизация, то в консоли запустим команду 
+php artisan make:auth
+
+5. теперь в нашу бд надо сделать таблицу для хранения инструкций
+php artisan make:migration create_instructions_tables
+
+6. в созданную таблицу внесем дополнительно поля:
+$table->string('title'); - название инструкции
+$table->string('instruction_path'); - файл инструкции
+$table->integer('is_approved'); - одобрена ли администратором инструкция
+$table->unsignedBigInteger('user_id')->index(); - id пользователя. который добавил инструкцию
+$table->foreign('user_id')->references('id')->on('users'); - связка с таблицей пользователей
+
+7. после того как заполнили параметры для создания таблицы выполняем команду в консоли 
+php artisan migrate
+
+8. дальше нам надо создать таблицу для жалоб на иснтрукцию
+php artisan make:migration create_reports_tables
+
+9. в созданную таблицу внесем дополнительно поля:
+$table->string('description'); - суть жалобы
+$table->unsignedBigInteger('instruction_id')->index(); - id инструкции
+$table->unsignedBigInteger('user_id')->index(); - id пользователя
+$table->foreign('instruction_id')->references('id')->on('instructions'); - связка с таблицей инструкций
+$table->foreign('user_id')->references('id')->on('users'); - связка с таблицей пользователей
+
+10. после того как заполнили параметры для создания таблицы выполняем команду в консоли 
+php artisan migrate
+
+11. в модель User добавим две функции связывания для жалоб и инструкций, будем использовать метод hasMany (один ко многим)
+public function reports(){
+        return $this->hasMany(Report::class);
+    }
+
+    public function instructions(){
+        return $this->hasMany(Instruction::class);
+    }
+связывание моделей Eloquent позволит получать данные из таблиц при запросе
+12. теперь надо создать модель для инструкций
+php artisan make:model Instruction
+
+в модели пропишем две функции связывания reports и author, в функциях будем использовать методы hasMany 
+и belongsTo (многие к одному)
+public function reports(){
+        return $this->hasMany(Report::class);
+    }
+
+    public function author(){
+        return $this->belongsTo(User::class,'user_id');
+    }
+
+13. по такому же принципу создаем модель для жалоб
+php artisan make:model Report
+
+в модели в свойстве $fillable укажем поле 'description' для заполнения 
+и пропишем две функции связывания instruction и reporter, в функциях будем использовать метод belongsTo (многие к одному)
+public function instruction(){
+        return $this->belongsTo(Instruction::class);
+    }
+
+    public function reporter(){
+        return $this->belongsTo(User::class,'user_id');
+    }
+
+14. далее будем создавать контроллер
+php artisan make:controller InstructionsController --resource
+
+в контроллере подключим модель Instruction, а так же фасады авторизации и Storage для файлов, 
+загружаемых на сайте
+
+15. после создадим контроллер
+php artisan make:controller ReportsController --resource
+в нем опишем только метод store и подключим модели Instruction и Report, а также фасад аутентификации
+
+16. также понадобится посредник на одобрение загруженной инструкции
+php artisan make:middleware CheckNonApproved
+в handle пропишем такой код:
+$instr =  $request->route('instruction');
+        if($instr->is_approved){
+            return $next($request);
+        }
+        return redirect('/');
+
+17. теперь переходим к созданию представлений
+в папке resources\views создадим папку instructions, в которой будут лежать файлы с раширением blade.php
+представление create.blade.php будет содержать форму для размещения инструкции и отправки ее на портал
+представление instruction.blade.php будет содержать отображение этой инструкции, скачивания ее с сайта, 
+а также размещение жалобы на инструкцию администрации портала 
+
+18. исправим представление home.blade.php под наш портал
+на этой странице будет поисковик по инструкциям и отображение названий всех инструкций
+
+19. теперь нам надо создать представление manage.blade.php для одобрения или удаления инструкций, 
+этот файл будем размещать непосредственно в папке views
+
+20. и осталось поправить стартовое представление app.blade.php
+так как в проекте буду использовать bootstrap 4, то его нужно будет подключить 
+
+21. и самое главное чтобы все это работало, надо настроить роуты
+все роуты настраиваем в директории routes\web.php
+
+22. теперь нам надо настроить админа, так как в начале мы этого не сделали, то теперь нам надо в 
+таблицу users новое поле is_admin, для этого в консоли введем команду:
+php artisan make:migration add_is_admin_to_users_table --table=users
+
+23. в сгенерированном файле изменяем методы up и down, после этого выполняем миграцию
+php artisan migrate
+
+24. теперь в модели User добавим метод проверки пользователя на статус администратора isAdmin
+
+25. также необходимо создать посредника middelware для фильтрации HTTP-запросов приложения, 
+посредник должен проверять есть ли у пользователя права администратора, для этого выполним команду
+php artisan make:middleware CheckIsAdmin
+
+26. в сгенерированном файле заменим функцию handle и зарегистрируем посредника в Kernel.php,
+ в нем найдем массив protected $routeMiddleware и добавим в конце него наш класс:
+'isadmin' => \App\Http\Middleware\CheckIsAdmin::class,
+
+27. теперь осталось указать какие пути сайта мы будем отслеживать, в файл web.php добавим наш middelware 
+в группу роутов, которая отвечает за панель администратора
+
+
+
+
